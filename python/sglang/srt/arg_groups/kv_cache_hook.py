@@ -410,6 +410,24 @@ def handle_cache_compatibility(server_args: Any) -> None:
                 "versions yet."
             )
 
+    # Routed experts and indexer top-k are recorded per KV slot by the forward that writes it.
+    if cfg.enable_return_routed_experts or cfg.enable_return_indexer_topk:
+        if (
+            cfg.enable_hierarchical_cache
+            or cfg.enable_lmcache
+            or cfg.enable_flexkv
+            or cfg.radix_cache_backend == "flexkv"
+            or cfg.enable_unified_cache_external_linker
+        ):
+            raise ValueError(
+                "Neither enable-return-routed-experts nor enable-return-indexer-topk can be "
+                "combined with a host or external KV tier (enable-hierarchical-cache, "
+                "enable-lmcache, enable-flexkv, radix-cache-backend=flexkv, "
+                "enable-unified-cache-external-linker): KV loaded back from it skips the forward "
+                "that records them, so the returned routed experts or indexer top-k would be "
+                "stale."
+            )
+
     if cfg.disaggregation_decode_enable_offload_kvcache:
         if cfg.disaggregation_mode != "decode":
             raise ValueError(

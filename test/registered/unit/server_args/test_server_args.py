@@ -2365,6 +2365,35 @@ class TestHiCacheArgs(CustomTestCase):
 
         handle_cache_compatibility(args)
 
+    def test_returned_topk_rejects_host_and_external_kv_tiers(self):
+        """KV loaded back from a host or external tier has no top-k rows recorded at its new slots."""
+        for overrides in (
+            {"enable_hierarchical_cache": True},
+            {"enable_lmcache": True},
+            {"enable_flexkv": True},
+            {"enable_unified_cache_external_linker": True},
+            {"radix_cache_backend": "flexkv"},
+        ):
+            with self.subTest(overrides=overrides):
+                args = self._make_args(enable_return_routed_experts=True, **overrides)
+
+                with self.assertRaisesRegex(ValueError, "host or external KV tier"):
+                    handle_cache_compatibility(args)
+
+        with self.subTest(enable_return_indexer_topk=True):
+            args = self._make_args(
+                enable_return_indexer_topk=True, enable_hierarchical_cache=True
+            )
+
+            with self.assertRaisesRegex(ValueError, "host or external KV tier"):
+                handle_cache_compatibility(args)
+
+    def test_routed_experts_alone_is_accepted(self):
+        """A plain engine may return routed experts."""
+        args = self._make_args(enable_return_routed_experts=True)
+
+        handle_cache_compatibility(args)
+
     def test_decode_offload_rejects_host_pool_retraction(self):
         args = self._make_args(
             disaggregation_mode="decode",
