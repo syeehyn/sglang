@@ -17,6 +17,7 @@ from sglang.srt.model_executor.forward_batch_info import (
 )
 from sglang.srt.runtime_context import get_context
 from sglang.srt.speculative import spec_utils
+from sglang.srt.state_capturer.routed_experts_rows import ForcingBatch
 from sglang.test.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
@@ -218,6 +219,10 @@ class TestMambaPrefillTrackMetadata(unittest.TestCase):
             mamba_track_seqlens=torch.tensor([65]),
             mamba_prefill_track_mask_cpu=[True],
             mamba_track_seqlens_cpu=[65],
+            forced_routes=ForcingBatch(
+                mask=torch.ones(1, dtype=torch.bool),
+                routes=torch.zeros((1, 1, 1), dtype=torch.uint8),
+            ),
         )
         runner = SimpleNamespace(
             device="cpu",
@@ -245,6 +250,7 @@ class TestMambaPrefillTrackMetadata(unittest.TestCase):
             capture_hidden_mode=CaptureHiddenMode.NULL,
             return_hidden_states_before_norm=False,
         )
+        self.assertIs(forward.forced_routes, batch.forced_routes)
         for target, source in (
             ("mamba_prefill_track_mask_cpu", "mamba_prefill_track_mask_cpu"),
             ("mamba_track_seqlens_cpu", "mamba_track_seqlens_cpu"),

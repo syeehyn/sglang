@@ -2780,6 +2780,10 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     meta_info["cached_tokens_details"] = recv_obj.cached_tokens_details[
                         i
                     ]
+                if recv_obj.routed_experts_replay is not None and (
+                    replay := recv_obj.routed_experts_replay[i]
+                ):
+                    meta_info["routed_experts_replay"] = replay
                 if customized_info is not None:
                     self.update_request_meta_info(
                         meta_info,

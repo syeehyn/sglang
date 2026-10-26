@@ -478,6 +478,27 @@ class TestIndexerTopkMetaInfo(CustomTestCase):
         self.assertEqual(meta_info["indexer_topk_num_layers"], 7)
 
 
+class TestRoutedExpertsReplayMetaInfo(CustomTestCase):
+    def test_replay_counters_reach_meta_info(self):
+        tm = _make_tokenizer_manager(self)
+        rid = "routed_experts_replay_rid"
+        state = _make_req_state(rid)
+        tm.rid_to_state[rid] = state
+        counters = {
+            "forced_tokens": 3,
+            "retract_snapshots": 1,
+            "snapshot_dropped": 0,
+            "prefix_mismatch_tokens": 0,
+        }
+        batch_output = _make_batch_str_output(rid)
+        batch_output.routed_experts_replay = [counters]
+
+        asyncio.run(tm._handle_batch_output(batch_output))
+
+        meta_info = state.out_list[-1]["meta_info"]
+        self.assertEqual(meta_info["routed_experts_replay"], counters)
+
+
 class _FakeOutputStore:
     """OutputStoreWriter boundary: records what would be written or deleted."""
 

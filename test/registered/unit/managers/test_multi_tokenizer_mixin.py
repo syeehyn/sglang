@@ -392,6 +392,25 @@ class TestMultiTokenizerMixin(CustomTestCase):
 
         self.assertIsNone(_handle_output_by_index(output, 0).prefill_weight_versions)
 
+    def test_split_keeps_routed_experts_replay_per_request(self):
+        counters = {
+            "forced_tokens": 3,
+            "retract_snapshots": 1,
+            "snapshot_dropped": 0,
+            "prefix_mismatch_tokens": 0,
+        }
+        for make in (_make_batch_str_output, _make_batch_token_id_output):
+            with self.subTest(make.__name__):
+                output = make()
+                output.routed_experts_replay = [counters, None]
+                self.assertEqual(
+                    _handle_output_by_index(output, 0).routed_experts_replay,
+                    [counters],
+                )
+                self.assertEqual(
+                    _handle_output_by_index(output, 1).routed_experts_replay, [None]
+                )
+
     def test_get_tokenizer_worker_class_uses_default(self):
         self.assertIs(get_tokenizer_worker_class(DefaultServerArgs()), TokenizerWorker)
 

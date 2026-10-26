@@ -11,6 +11,7 @@ from sglang.test.test_utils import CustomTestCase, maybe_stub_sgl_kernel
 maybe_stub_sgl_kernel()
 
 from sglang.srt.managers.schedule_batch import ScheduleBatch  # noqa: E402
+from sglang.srt.state_capturer.routed_experts_rows import ForcingBatch  # noqa: E402
 
 register_cpu_ci(est_time=10, suite="base-a-test-cpu")
 
@@ -56,6 +57,21 @@ class TestPrepareForDecodeMambaInit(CustomTestCase):
         self.assertIsNone(batch.mamba_cow_src_indices)
         self.assertIsNone(batch.mamba_cow_dst_indices)
         self.assertIsNone(batch.mamba_clear_indices)
+
+
+class TestPrepareForDecodeForcedRoutes(CustomTestCase):
+    def test_decode_drops_the_extend_forced_routes(self):
+        batch = ScheduleBatch(reqs=[])
+        batch.spec_algorithm = types.SimpleNamespace(is_none=lambda: False)
+        batch.forced_routes = ForcingBatch(
+            mask=torch.ones(1, dtype=torch.bool),
+            routes=torch.zeros((1, 1, 1), dtype=torch.uint8),
+        )
+
+        with patch("sglang.srt.speculative.spec_utils.spec_prepare_for_decode"):
+            batch.prepare_for_decode()
+
+        self.assertIsNone(batch.forced_routes)
 
 
 class TestPrepareForDecodeSeqLensOwnership(unittest.TestCase):

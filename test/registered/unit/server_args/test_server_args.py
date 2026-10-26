@@ -3795,6 +3795,92 @@ class TestTwoBatchOverlapBackend(CustomTestCase):
         check_two_batch_overlap(args)
 
 
+class TestRoutedExpertsReplayArgs(CustomTestCase):
+    def _check(self, **overrides):
+        args = ServerArgs(model_path="dummy")
+        args.enable_routed_experts_replay = True
+        args.enable_return_routed_experts = True
+        args.moe_runner_backend = "triton"
+        for key, value in overrides.items():
+            setattr(args, key, value)
+        validation_hook.check_routed_experts_replay_server_args(args)
+
+    def test_supported_options_start(self):
+        for runner in ("flashinfer_cutlass", "flashinfer_trtllm_routed"):
+            self._check(moe_runner_backend=runner)
+        self._check(tp_size=2, ep_size=2)
+        # With attention TP 1, an all-to-all backend still routes whole batches.
+        self._check(moe_a2a_backend="deepep")
+        # A retracted request stays in its replica, with its held rows.
+        self._check(dp_size=2)
+        self._check(enable_routed_experts_replay=False, enable_hierarchical_cache=True)
+
+    def test_conflicts_are_refused(self):
+        split = "tokens split across ranks"
+        restored = "HiCache, LMCache, FlexKV"
+        conflicts = [
+            (
+                "requires --enable-return-routed-experts",
+                {"enable_return_routed_experts": False},
+            ),
+            (
+                "requires --moe-runner-backend .*, got 'auto'",
+                {"moe_runner_backend": "auto"},
+            ),
+            (
+                "--routed-experts-replay-max-tokens must be positive, got 0",
+                {"routed_experts_replay_max_tokens": 0},
+            ),
+            ("--enable-return-indexer-topk", {"enable_return_indexer_topk": True}),
+            ("DP attention", {"tp_size": 2, "attn_dp_size": 2}),
+            ("pipeline parallelism", {"pp_size": 2}),
+            ("context parallelism", {"tp_size": 2, "attn_cp_size": 2}),
+            ("decode context parallelism", {"dcp_size": 2}),
+            ("speculative decoding", {"speculative_algorithm": "EAGLE"}),
+            ("batch overlap", {"enable_two_batch_overlap": True}),
+            ("batch overlap", {"enable_single_batch_overlap": True}),
+            ("PD disaggregation", {"disaggregation_mode": "decode"}),
+            ("PD disaggregation", {"enable_pdmux": True}),
+            ("--enable-streaming-session", {"enable_streaming_session": True}),
+            (restored, {"enable_hierarchical_cache": True}),
+            (restored, {"enable_lmcache": True}),
+            (restored, {"enable_flexkv": True}),
+            (restored, {"enable_unified_cache_external_linker": True}),
+            (restored, {"radix_cache_backend": "custom"}),
+            (split, {"tp_size": 2, "moe_a2a_backend": "deepep"}),
+            (split, {"tp_size": 2, "enable_attn_tp_input_scattered": True}),
+            (split, {"tp_size": 2, "moe_dense_tp_size": 1}),
+            (split, {"tp_size": 2, "dwdp_size": 2}),
+        ]
+        for conflict, overrides in conflicts:
+            with self.subTest(**overrides):
+                with self.assertRaisesRegex(ValueError, conflict):
+                    self._check(**overrides)
+        with self.assertRaisesRegex(ValueError, "parallelism; speculative"):
+            self._check(pp_size=2, speculative_algorithm="EAGLE")
+        with patch.object(
+            validation_hook.envs.SGLANG_RUST_SERVER, "get", return_value=True
+        ):
+            with self.assertRaisesRegex(ValueError, "SGLANG_RUST_SERVER"):
+                self._check()
+        with patch.object(
+            validation_hook.envs.SGLANG_EXPERIMENTAL_LORA_OPTI, "get", return_value=True
+        ):
+            with self.assertRaisesRegex(ValueError, "SGLANG_OPT_LORA_FUSED_TOPK_PACK"):
+                self._check()
+
+    def test_check_server_args_runs_the_check(self):
+        with self.assertRaisesRegex(
+            ValueError, "requires --enable-return-routed-experts"
+        ):
+            ServerArgs(
+                model_path="dummy",
+                served_model_name="dummy",
+                chunked_prefill_size=-1,
+                enable_routed_experts_replay=True,
+            ).check_server_args()
+
+
 class TestKvCacheShardingCompatibility(CustomTestCase):
     def setUp(self):
         super().setUp()

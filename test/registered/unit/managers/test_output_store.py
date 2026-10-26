@@ -274,7 +274,7 @@ class TestMaybeCreateOutputStore(CustomTestCase):
 
 
 class TestDetokenizerReplayOutputs(CustomTestCase):
-    def _handle(self, *, output_store_enabled):
+    def _handle(self, *, output_store_enabled, **fields):
         manager = DetokenizerManager.__new__(DetokenizerManager)
         manager.output_store_enabled = output_store_enabled
         recv_obj = SimpleNamespace(
@@ -282,6 +282,7 @@ class TestDetokenizerReplayOutputs(CustomTestCase):
         )
         recv_obj.rids = []
         recv_obj.routed_experts = [torch.tensor([[1, 2]], dtype=torch.int32)]
+        vars(recv_obj).update(fields)
         return manager.handle_batch_token_id_out(recv_obj), recv_obj.routed_experts
 
     def test_tensors_skip_base64_only_when_store_enabled(self):
@@ -295,6 +296,18 @@ class TestDetokenizerReplayOutputs(CustomTestCase):
             [pybase64.b64encode(tensors[0].numpy().tobytes()).decode("utf-8")],
         )
         self.assertIsNone(out.routed_experts_raw)
+
+    def test_routed_experts_replay_counters_pass_through(self):
+        counters = {
+            "forced_tokens": 3,
+            "retract_snapshots": 1,
+            "snapshot_dropped": 0,
+            "prefix_mismatch_tokens": 0,
+        }
+        out, _ = self._handle(
+            output_store_enabled=False, routed_experts_replay=[counters]
+        )
+        self.assertEqual(out.routed_experts_replay, [counters])
 
 
 if __name__ == "__main__":

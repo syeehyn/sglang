@@ -342,6 +342,9 @@ from sglang.srt.speculative.spec_sampling_mask import (
 from sglang.srt.speculative.uno_validation import validate_uno_request
 from sglang.srt.state_capturer.indexer_topk import destroy_global_indexer_capturer
 from sglang.srt.state_capturer.routed_experts import destroy_global_experts_capturer
+from sglang.srt.state_capturer.routed_experts_replay import (
+    get_global_routed_experts_replay,
+)
 from sglang.srt.utils import (
     DynamicGradMode,
     configure_gc_logger,
@@ -3442,6 +3445,8 @@ class Scheduler(
         self.tree_cache.finish(req.cache_request_handle, CacheRequestOutcome.ABORT)
         if req.session is not None and req.session.streaming:
             req.session.abort_req()
+        if (replay := get_global_routed_experts_replay()) is not None:
+            replay.release(req)
 
     def _abort_on_queued_limit(self, recv_req: Req) -> bool:
         """Abort an incoming or existing request if the waiting queue is full. Returns True if the incoming request is aborted."""
@@ -4414,10 +4419,14 @@ class Scheduler(
                     _make_abort_req(req, finished_reason=abort_reason.to_json()),
                     req,
                 )
+            replay = get_global_routed_experts_replay()
             for req in reqs_to_abort:
                 # Member rows were freed inside retract_decode; the group only
                 # has to leave the live set.
                 self.beam_coordinator.retire_group(req)
+                if replay is not None:
+                    # Aborted unfinished, so no collection frees its held rows.
+                    replay.release(req)
 
             msg_prefix = (
                 "KV cache pool is full. Retract requests. "
