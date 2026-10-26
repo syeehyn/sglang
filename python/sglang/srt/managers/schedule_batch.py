@@ -142,6 +142,9 @@ from sglang.srt.observability.req_time_stats import (
 from sglang.srt.sampling.sampling_batch_info import SamplingBatchInfo
 from sglang.srt.sampling.sampling_mask import SamplingMaskRows
 from sglang.srt.sampling.sampling_params import SamplingParams
+from sglang.srt.state_capturer.routed_experts_replay import (
+    get_global_routed_experts_replay,
+)
 from sglang.srt.utils import flatten_nested_list
 from sglang.srt.utils.token_sequence_matcher import TokenSequenceMatcher
 
@@ -154,6 +157,8 @@ if TYPE_CHECKING:
     from sglang.srt.mem_cache.storage_prefetch import StagedPrefetchPlan
     from sglang.srt.session.session_controller import Session
     from sglang.srt.speculative.spec_info import SpecInput, SpeculativeAlgorithm
+    from sglang.srt.state_capturer.routed_experts_replay import ReplayState
+    from sglang.srt.state_capturer.routed_experts_rows import ForcingBatch
 
 INIT_INCREMENTAL_DETOKENIZATION_OFFSET = 5
 
@@ -1300,6 +1305,8 @@ class Req(ReqDllmMixin):
         self.routed_experts: Optional[torch.Tensor] = (
             None  # cpu tensor: shape (seqlen, topk)
         )
+        # Rows held for routed-experts replay; kept across retracts.
+        self.routed_experts_replay_state: Optional[ReplayState] = None
 
         self.return_indexer_topk = return_indexer_topk
         self.indexer_topk: Optional[torch.Tensor] = (
@@ -1666,7 +1673,10 @@ class Req(ReqDllmMixin):
         if tree_cache is not None:
             if cow_mamba is None:
                 cow_mamba = tree_cache.supports_mamba()
-            match_result = match_kv_cache(
+            replay = get_global_routed_experts_replay()
+            # Replay cuts a match whose cached routes differ from the held rows.
+            match = match_kv_cache if replay is None else replay.match_kv_cache
+            match_result = match(
                 self,
                 tree_cache,
                 token_ids_to_match,
@@ -2253,6 +2263,9 @@ def release_req(
     offload_kv: bool = True,
 ) -> bool:
     """Returns False when the KV backup failed and the request cannot be resumed."""
+    # Before the release: the snapshot reads rows through the request's KV slots.
+    if (replay := get_global_routed_experts_replay()) is not None:
+        replay.snapshot_on_retract(req)
     if hisparse_coordinator is not None and not req.finished():
         hisparse_coordinator.retract_req(req)
 
@@ -2417,6 +2430,9 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
     # Token replacement embeddings and absolute positions (optional).
     replace_embeds: Optional[torch.Tensor] = None
     replace_positions: Optional[torch.Tensor] = None
+
+    # Held routes this extend recomputes, on the host (None: nothing forced).
+    forced_routes: Optional[ForcingBatch] = None
 
     # Read by ForwardBatch ngram embedding init
     ne_token_table: torch.Tensor = None
@@ -2958,6 +2974,14 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         )
         self.replace_embeds = replace_embeds_tensor
         self.replace_positions = replace_positions_tensor
+        replay = get_global_routed_experts_replay()
+        self.forced_routes = (
+            None
+            if replay is None
+            else replay.build_batch(
+                reqs=reqs, prefix_lens=prefix_lens, extend_lens=extend_lens
+            )
+        )
         for mm_input in multimodal_inputs:
             if mm_input is None:
                 continue
@@ -3217,6 +3241,9 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
             self.extend_logprob_start_lens + [0] * running_bs
         )
         self.is_prefill_only = False
+        if self.forced_routes is not None:
+            # The decode tails follow the extend rows and are never forced.
+            self.forced_routes = self.forced_routes.padded_to(self.extend_num_tokens)
 
     def convert_decode_to_extend(self):
         """View every decode request as a 1-token extend with its context as
@@ -3572,6 +3599,8 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         # Decode embeds the last output token via embed_tokens; clear the stale
         # prefill-time tensor so it doesn't leak into ForwardBatch.
         self.input_embeds = None
+        # Decode computes only new positions.
+        self.forced_routes = None
 
         self.mamba_cow_src_indices = None
         self.mamba_cow_dst_indices = None

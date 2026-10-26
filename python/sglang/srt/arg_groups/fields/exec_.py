@@ -124,6 +124,19 @@ class ExecFeatures(msgspec.Struct):
     enable_return_routed_experts: A[
         bool, "Enable returning routed experts of each layer with responses."
     ] = False
+    enable_routed_experts_replay: A[
+        bool,
+        "Recompute a retracted return_routed_experts request's tokens with the "
+        "routed experts the engine first computed for them. "
+        "Requires --enable-return-routed-experts and --moe-runner-backend triton, "
+        "flashinfer_cutlass or flashinfer_trtllm_routed.",
+    ] = False
+    routed_experts_replay_max_tokens: A[
+        int,
+        "Maximum tokens of routed experts held for replay per TP rank, in host "
+        "memory; a retract whose new rows would exceed it recomputes those rows "
+        "unforced.",
+    ] = 4_000_000
     enable_return_indexer_topk: A[
         bool,
         "Enable returning indexer topk indices of layers with indexer with responses.",

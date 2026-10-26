@@ -610,6 +610,24 @@ A request can outlive a version change: the RL flow retracts it with `pause_gene
 - Ranges are half-open `[start, end)` over output-token indices, prompt excluded. The usual case is a single span.
 - `--enable-prefill-weight-versions` adds `prefill_weight_versions`, the same span list over the prompt tokens, so KV reused from the prefix cache under older weights is visible.
 
+### Routed-Experts Replay Across Retracts
+
+With `--enable-routed-experts-replay`, a `return_routed_experts` request retracted by `pause_generation` (`mode: "retract"`) or by memory pressure re-prefills with the routed experts the engine first computed for its tokens, so the returned `routed_experts` stay the ones that sampled each token across a refit. `meta_info` reports what replay did:
+
+```json Output
+"routed_experts_replay": {
+    "forced_tokens": 312,
+    "retract_snapshots": 1,
+    "snapshot_dropped": 0,
+    "prefix_mismatch_tokens": 0
+}
+```
+
+- `forced_tokens`: recomputed tokens that reused their first-computed routed experts, summed over forwards.
+- `retract_snapshots`: retracts that held new rows.
+- `snapshot_dropped`: retracts whose new rows could not be held, because they looked invalid, differed across TP ranks or would exceed `--routed-experts-replay-max-tokens`; those tokens were recomputed unforced.
+- `prefix_mismatch_tokens`: prefix-cache hits given up because the cached routes differed or might not be written yet.
+
 ## Easy To Postpone Generation
 
 Multi-turn RL rollouts often suffer from long-tail requests that block the entire batch. A small number of slow interactions can stall all GPUs, and the long-tail behavior makes profiling and monitoring difficult.

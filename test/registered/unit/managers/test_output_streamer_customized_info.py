@@ -730,6 +730,43 @@ class TestOutputStreamerSamplingMasks(unittest.TestCase):
                 self.assertEqual(received, expected)
 
 
+class TestOutputStreamerRoutedExpertsReplay(unittest.TestCase):
+    def test_only_finished_return_routed_experts_requests_carry_counters(self):
+        counters = {
+            "forced_tokens": 9,
+            "retract_snapshots": 1,
+            "snapshot_dropped": 0,
+            "prefix_mismatch_tokens": 0,
+        }
+        reqs = [
+            _FakeReq("streaming", [10]),
+            _FakeReq("retracted", [20], finished=True),
+            _FakeReq("never_retracted", [30], finished=True),
+            _FakeReq("no_routes", [40], finished=True),
+        ]
+        for req, state in zip(
+            reqs,
+            (
+                SimpleNamespace(meta_info=lambda: counters),
+                SimpleNamespace(meta_info=lambda: counters),
+                None,
+                None,
+            ),
+        ):
+            req.return_routed_experts = req.rid != "no_routes"
+            req.routed_experts_replay_state = state
+
+        accumulator = dataclasses.replace(
+            _accumulator(), return_routed_experts_replay=True
+        )
+        for req in reqs:
+            accumulator.accept(req=req)
+        payload = accumulator.to_payload(dp_rank=0, is_idle_batch=False)
+
+        zeros = dict.fromkeys(counters, 0)
+        self.assertEqual(payload.routed_experts_replay, [None, counters, zeros, None])
+
+
 class TestOutputStreamerPrefillWeightVersions(unittest.TestCase):
     def test_payload_carries_prefill_spans_for_finished_requests(self):
         """Prefill spans computed before the KV release ride out with the finished request."""

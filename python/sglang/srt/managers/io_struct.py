@@ -1742,6 +1742,9 @@ class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
     input_top_logprobs_idx_flat: Optional[List[Optional[np.ndarray]]] = None
     input_top_logprobs_flat_null_prefix: Optional[List[Optional[int]]] = None
 
+    # Routed-experts replay counters per finished return_routed_experts request.
+    routed_experts_replay: Optional[List[Optional[dict]]] = None
+
 
 class BatchStrOutput(BaseBatchReq, kw_only=True):
     # The finish reason
@@ -1842,6 +1845,8 @@ class BatchStrOutput(BaseBatchReq, kw_only=True):
     # --output-store-backend is set; TokenizerManager encodes them per request.
     routed_experts_raw: Optional[List[Optional[torch.Tensor]]] = None
     indexer_topk_raw: Optional[List[Optional[torch.Tensor]]] = None
+    # See BatchTokenIDOutput.routed_experts_replay.
+    routed_experts_replay: Optional[List[Optional[dict]]] = None
 
 
 class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):

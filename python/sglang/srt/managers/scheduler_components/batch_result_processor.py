@@ -52,6 +52,9 @@ from sglang.srt.sampling.sampling_params import (
 from sglang.srt.speculative.base_spec_worker import BaseSpecWorker
 from sglang.srt.state_capturer.indexer_topk import get_global_indexer_capturer
 from sglang.srt.state_capturer.routed_experts import get_global_experts_capturer
+from sglang.srt.state_capturer.routed_experts_replay import (
+    get_global_routed_experts_replay,
+)
 
 if TYPE_CHECKING:
     from sglang.srt.beam_search.coordinator import BeamCoordinator
@@ -147,6 +150,9 @@ class SchedulerBatchResultProcessor:
 
         Logs a soft warning if the resulting tensor's row count differs from
         the expected `seqlen - 1 - start_len`, to catch silent regressions.
+
+        With routed-experts replay, also frees the request's held rows and lets
+        its KV into the radix tree again.
         """
         if not req.return_routed_experts:
             return
@@ -179,6 +185,8 @@ class SchedulerBatchResultProcessor:
                 req.cached_tokens,
                 req.routed_experts_start_len,
             )
+        if (replay := get_global_routed_experts_replay()) is not None:
+            replay.release(req)
 
     def _maybe_collect_indexer_topk(self, req: Req):
         capturer = get_global_indexer_capturer()
